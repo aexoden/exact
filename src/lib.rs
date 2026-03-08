@@ -26,7 +26,7 @@ pub fn run(max_fractional_digits: usize) -> Result<()> {
     writeln!(out, "Enter expressions using +, -, *, /")?;
     writeln!(
         out,
-        "Press Enter to evaluate. Type 'c' to clear, 'q' to quit."
+        "Press Enter (or '=') to repeat last operation. Type 'c' to clear, 'q' to quit."
     )?;
     writeln!(out)?;
 
@@ -35,6 +35,16 @@ pub fn run(max_fractional_digits: usize) -> Result<()> {
         let line = line.trim().to_string();
 
         if line.is_empty() {
+            if let Err(e) = engine.repeat_last() {
+                writeln!(out, "  Error: {e}")?;
+            } else {
+                writeln!(
+                    out,
+                    "  {}",
+                    format_rational(engine.current_value(), max_digits)
+                )?;
+            }
+            out.flush()?;
             continue;
         }
 
