@@ -1,0 +1,25 @@
+[package]
+name = "exact"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.93"
+description = "An arbitrary precision calculator written in Rust."
+repository = "https://github.com/aexoden/exact"
+license = "Apache-2.0 OR MIT"
+keywords = ["calculator", "math"]
+categories = ["mathematics", "command-line-utilities"]
+
+[dependencies]
+anyhow = { version = "1.0.102", features = ["backtrace"] }
+
+[lints.clippy]
+cargo = { level = "warn", priority = -1 }
+expect_used = "warn"
+missing_errors_doc = "allow"
+multiple_crate_versions = "allow"
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+
+[lints.rust]
+future_incompatible = { level = "warn", priority = -1 }
+let_underscore = { level = "warn", priority = -1 }
