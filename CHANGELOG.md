@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- Arbitrary precision calculator engine using rational arithmetic (no precision loss).
+- Basic arithmetic operations: addition, subtraction, multiplication, division.
+- Configurable display precision with `~` prefix for inexact representations.
+- Interactive CLI REPL with number-pad-friendly input.
+- Implicit use of last result when starting a new operation after equals.
+- Last result available as second operand when no explicit operand is provided.
+- Repeat-equals behavior (pressing = repeatedly re-applies the last operation).
+
 ## [0.0.1] - 2026-03-07
 
 ### Added

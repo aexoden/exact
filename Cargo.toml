@@ -11,6 +11,7 @@ categories = ["mathematics", "command-line-utilities"]
 
 [dependencies]
 anyhow = { version = "1.0.102", features = ["backtrace"] }
+num = { version = "0.4", features = ["num-bigint"] }
 
 [lints.clippy]
 cargo = { level = "warn", priority = -1 }
