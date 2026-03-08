@@ -38,24 +38,17 @@ impl Operator {
     }
 }
 
-/// The calculator engine. Tracks pending operations and the last result.
+/// The calculator engine. Tracks the last result and last operation for
+/// repeat-equals behavior.
 ///
 /// Designed to be separable from the UI so it can later be used by a GUI.
 pub struct Engine {
-    /// The last computed result (used as implicit first operand).
+    /// The last computed result (used as implicit operand).
     last_result: BigRational,
-    /// The current accumulated value being entered/computed.
-    accumulator: BigRational,
-    /// A pending operator waiting for the second operand.
-    pending_op: Option<Operator>,
-    /// The left-hand side of the pending operation.
-    pending_lhs: Option<BigRational>,
-    /// Whether a new number entry has started (to distinguish "no input" from "entered 0").
-    has_input: bool,
-    /// Whether the last action was pressing equals.
-    just_evaluated: bool,
-    /// Stores the last operator and operand for repeat-equals behavior.
-    last_op: Option<(Operator, BigRational)>,
+    /// The current display value.
+    display: BigRational,
+    /// Stores the last operator and operands for repeat-equals behavior.
+    last_op: Option<(BigRational, Operator, BigRational)>,
 }
 
 impl Engine {
@@ -64,11 +57,7 @@ impl Engine {
     pub fn new() -> Self {
         Self {
             last_result: BigRational::zero(),
-            accumulator: BigRational::zero(),
-            pending_op: None,
-            pending_lhs: None,
-            has_input: false,
-            just_evaluated: false,
+            display: BigRational::zero(),
             last_op: None,
         }
     }
@@ -76,88 +65,52 @@ impl Engine {
     /// Get the current display value.
     #[must_use]
     pub fn current_value(&self) -> &BigRational {
-        &self.accumulator
+        &self.display
     }
 
-    /// Set the accumulator to a parsed rational number.
-    pub fn set_input(&mut self, value: BigRational) {
-        self.accumulator = value;
-        self.has_input = true;
-        self.just_evaluated = false;
+    /// Get the last computed result.
+    #[must_use]
+    pub fn last_result(&self) -> &BigRational {
+        &self.last_result
     }
 
-    /// Apply an operator. If there is a pending operation, evaluate it first.
-    pub fn apply_operator(&mut self, op: Operator) -> Result<()> {
-        if self.just_evaluated && !self.has_input {
-            // After pressing equals, start a new chain with the last result
-            self.pending_lhs = Some(self.last_result.clone());
-            self.pending_op = Some(op);
-            self.has_input = false;
-            self.just_evaluated = false;
-            return Ok(());
-        }
-
-        if let Some(pending) = self.pending_op
-            && self.has_input
-        {
-            // Evaluate the pending operation
-            let lhs = self.pending_lhs.clone().unwrap_or_else(BigRational::zero);
-            let result = pending.apply(&lhs, &self.accumulator)?;
-            self.accumulator = result;
-        }
-        // If no input, the user is changing the operator
-
-        self.pending_lhs = Some(self.accumulator.clone());
-        self.pending_op = Some(op);
-        self.has_input = false;
-        self.just_evaluated = false;
-
+    /// Evaluate a binary operation and update the display and last result.
+    pub fn evaluate_binary(
+        &mut self,
+        lhs: BigRational,
+        op: Operator,
+        rhs: BigRational,
+    ) -> Result<()> {
+        let result = op.apply(&lhs, &rhs)?;
+        self.last_op = Some((lhs, op, rhs));
+        self.display = result.clone();
+        self.last_result = result;
         Ok(())
     }
 
-    /// Evaluate the pending operation (equals key).
-    pub fn evaluate(&mut self) -> Result<()> {
-        if let Some(op) = self.pending_op {
-            let lhs = self.pending_lhs.clone().unwrap_or_else(BigRational::zero);
+    /// Set the display value without performing an operation.
+    /// Updates `last_result` so it can be used as an implicit operand.
+    pub fn set_value(&mut self, value: BigRational) {
+        self.display = value.clone();
+        self.last_result = value;
+        self.last_op = None;
+    }
 
-            let rhs = if self.has_input {
-                self.accumulator.clone()
-            } else {
-                // No second operand: use the last result as a convenience
-                self.last_result.clone()
-            };
-
-            let result = op.apply(&lhs, &rhs)?;
-            self.last_op = Some((op, rhs));
-            self.accumulator = result.clone();
+    /// Repeat the last operation (equals key with no new input).
+    /// Uses the current display value as the new lhs.
+    pub fn repeat_last(&mut self) -> Result<()> {
+        if let Some((_, op, ref rhs)) = self.last_op {
+            let result = op.apply(&self.display, rhs)?;
+            self.display = result.clone();
             self.last_result = result;
-            self.pending_op = None;
-            self.pending_lhs = None;
-            self.has_input = false;
-            self.just_evaluated = true;
-        } else if self.just_evaluated {
-            // Repeat last operation
-            if let Some((op, ref rhs)) = self.last_op {
-                let result = op.apply(&self.accumulator, rhs)?;
-                self.accumulator = result.clone();
-                self.last_result = result;
-            }
-        } else {
-            // No pending operation, just set last_result
-            self.last_result = self.accumulator.clone();
-            self.just_evaluated = true;
         }
-
         Ok(())
     }
 
     /// Clear the current state (C key).
     pub fn clear(&mut self) {
-        self.accumulator = BigRational::zero();
-        self.pending_op = None;
-        self.pending_lhs = None;
-        self.has_input = false;
-        self.just_evaluated = false;
+        self.display = BigRational::zero();
+        self.last_result = BigRational::zero();
         self.last_op = None;
     }
 }
@@ -269,98 +222,72 @@ mod tests {
     #[test]
     fn test_basic_addition() {
         let mut engine = Engine::new();
-        engine.set_input(ratio(2, 1));
-        engine.apply_operator(Operator::Add).ok();
-        engine.set_input(ratio(3, 1));
-        engine.evaluate().ok();
+        engine
+            .evaluate_binary(ratio(2, 1), Operator::Add, ratio(3, 1))
+            .ok();
         assert_eq!(*engine.current_value(), ratio(5, 1));
     }
 
     #[test]
     fn test_basic_subtraction() {
         let mut engine = Engine::new();
-        engine.set_input(ratio(10, 1));
-        engine.apply_operator(Operator::Subtract).ok();
-        engine.set_input(ratio(3, 1));
-        engine.evaluate().ok();
+        engine
+            .evaluate_binary(ratio(10, 1), Operator::Subtract, ratio(3, 1))
+            .ok();
         assert_eq!(*engine.current_value(), ratio(7, 1));
     }
 
     #[test]
     fn test_basic_multiplication() {
         let mut engine = Engine::new();
-        engine.set_input(ratio(6, 1));
-        engine.apply_operator(Operator::Multiply).ok();
-        engine.set_input(ratio(7, 1));
-        engine.evaluate().ok();
+        engine
+            .evaluate_binary(ratio(6, 1), Operator::Multiply, ratio(7, 1))
+            .ok();
         assert_eq!(*engine.current_value(), ratio(42, 1));
     }
 
     #[test]
     fn test_basic_division() {
         let mut engine = Engine::new();
-        engine.set_input(ratio(22, 1));
-        engine.apply_operator(Operator::Divide).ok();
-        engine.set_input(ratio(7, 1));
-        engine.evaluate().ok();
+        engine
+            .evaluate_binary(ratio(22, 1), Operator::Divide, ratio(7, 1))
+            .ok();
         assert_eq!(*engine.current_value(), ratio(22, 7));
     }
 
     #[test]
     fn test_division_by_zero() {
         let mut engine = Engine::new();
-        engine.set_input(ratio(1, 1));
-        engine.apply_operator(Operator::Divide).ok();
-        engine.set_input(ratio(0, 1));
-        assert!(engine.evaluate().is_err());
+        assert!(
+            engine
+                .evaluate_binary(ratio(1, 1), Operator::Divide, ratio(0, 1))
+                .is_err()
+        );
     }
 
     #[test]
-    fn test_chained_operations() {
-        // 2 + 3 + 4 = 9
+    fn test_last_result_preserved() {
+        // After 2+3=5, last_result should be 5
         let mut engine = Engine::new();
-        engine.set_input(ratio(2, 1));
-        engine.apply_operator(Operator::Add).ok();
-        engine.set_input(ratio(3, 1));
-        engine.apply_operator(Operator::Add).ok();
-        // At this point, 2+3=5 should be computed
-        assert_eq!(*engine.current_value(), ratio(5, 1));
-        engine.set_input(ratio(4, 1));
-        engine.evaluate().ok();
-        assert_eq!(*engine.current_value(), ratio(9, 1));
-    }
-
-    #[test]
-    fn test_result_carries_to_next_operation() {
-        // Compute 2 + 3 = 5, then (without entering a new number) + 4 = 9
-        let mut engine = Engine::new();
-        engine.set_input(ratio(2, 1));
-        engine.apply_operator(Operator::Add).ok();
-        engine.set_input(ratio(3, 1));
-        engine.evaluate().ok();
-        assert_eq!(*engine.current_value(), ratio(5, 1));
-
-        // Now press + without entering a number first
-        engine.apply_operator(Operator::Add).ok();
-        engine.set_input(ratio(4, 1));
-        engine.evaluate().ok();
-        assert_eq!(*engine.current_value(), ratio(9, 1));
+        engine
+            .evaluate_binary(ratio(2, 1), Operator::Add, ratio(3, 1))
+            .ok();
+        assert_eq!(*engine.last_result(), ratio(5, 1));
     }
 
     #[test]
     fn test_repeat_equals() {
-        // 2 + 3 = 5, = 8, = 11 (repeat adding 3)
+        // 2 + 3 = 5, then repeat: 5+3=8, 8+3=11
         let mut engine = Engine::new();
-        engine.set_input(ratio(2, 1));
-        engine.apply_operator(Operator::Add).ok();
-        engine.set_input(ratio(3, 1));
-        engine.evaluate().ok();
+        engine
+            .evaluate_binary(ratio(2, 1), Operator::Add, ratio(3, 1))
+            .ok();
         assert_eq!(*engine.current_value(), ratio(5, 1));
 
-        engine.evaluate().ok();
+        engine.repeat_last().ok();
         assert_eq!(*engine.current_value(), ratio(8, 1));
 
-        engine.evaluate().ok();
+        engine.repeat_last().ok();
         assert_eq!(*engine.current_value(), ratio(11, 1));
     }
 
@@ -368,44 +295,51 @@ mod tests {
     fn test_fraction_precision() {
         // 1/3 * 3 should equal exactly 1
         let mut engine = Engine::new();
-        engine.set_input(ratio(1, 1));
-        engine.apply_operator(Operator::Divide).ok();
-        engine.set_input(ratio(3, 1));
-        engine.evaluate().ok();
+        engine
+            .evaluate_binary(ratio(1, 1), Operator::Divide, ratio(3, 1))
+            .ok();
         assert_eq!(*engine.current_value(), ratio(1, 3));
 
-        engine.apply_operator(Operator::Multiply).ok();
-        engine.set_input(ratio(3, 1));
-        engine.evaluate().ok();
+        // Use last_result (1/3) as lhs, multiply by 3
+        let prev = engine.last_result().clone();
+        engine
+            .evaluate_binary(prev, Operator::Multiply, ratio(3, 1))
+            .ok();
         assert_eq!(*engine.current_value(), ratio(1, 1));
     }
 
     #[test]
     fn test_clear() {
         let mut engine = Engine::new();
-        engine.set_input(ratio(42, 1));
-        engine.apply_operator(Operator::Add).ok();
+        engine
+            .evaluate_binary(ratio(42, 1), Operator::Add, ratio(1, 1))
+            .ok();
         engine.clear();
         assert_eq!(*engine.current_value(), ratio(0, 1));
+        assert_eq!(*engine.last_result(), ratio(0, 1));
     }
 
     #[test]
-    fn test_last_result_as_second_operand() {
-        // Compute 10 / 3, then compute 100 * (result)
-        // Without entering a second operand, the last result is used
+    fn test_set_value() {
         let mut engine = Engine::new();
-        engine.set_input(ratio(10, 1));
-        engine.apply_operator(Operator::Divide).ok();
-        engine.set_input(ratio(3, 1));
-        engine.evaluate().ok();
-        // last_result = 10/3
+        engine.set_value(ratio(42, 1));
+        assert_eq!(*engine.current_value(), ratio(42, 1));
+        assert_eq!(*engine.last_result(), ratio(42, 1));
+    }
+
+    #[test]
+    fn test_last_result_as_implicit_operand() {
+        // Compute 10/3, then use result as rhs: 100 * <last> = 1000/3
+        let mut engine = Engine::new();
+        engine
+            .evaluate_binary(ratio(10, 1), Operator::Divide, ratio(3, 1))
+            .ok();
         assert_eq!(*engine.current_value(), ratio(10, 3));
 
-        engine.set_input(ratio(100, 1));
-        engine.apply_operator(Operator::Multiply).ok();
-        // Don't enter a second operand, press equals
-        // Should use last_result (10/3) as second operand
-        engine.evaluate().ok();
+        let last = engine.last_result().clone();
+        engine
+            .evaluate_binary(ratio(100, 1), Operator::Multiply, last)
+            .ok();
         assert_eq!(*engine.current_value(), ratio(1000, 3));
     }
 }

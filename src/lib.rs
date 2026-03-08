@@ -61,98 +61,80 @@ pub fn run() -> Result<()> {
     Ok(())
 }
 
-/// Process a single line of input.
+/// Process a single line of input. Each line is treated independently.
 ///
-/// Supports formats like:
-/// - `5` (set a number)
-/// - `+ 3` (operator and number)
-/// - `+` (operator only, second operand from last result)
-/// - `=` (evaluate)
-/// - `* 2` then `=` on next line
+/// Supported forms:
+/// - `5+2`  — full expression, evaluated immediately
+/// - `+5`   — operator-prefixed: `<last_result> + 5`
+/// - `5+`   — operator-suffixed: `5 + <last_result>`
+/// - `5`    — bare number, sets value and becomes the last result
+/// - `=`    — repeat the last operation
 fn process_line(line: &str, engine: &mut Engine) -> Result<()> {
     let line = line.trim();
 
-    // Check if line starts with an operator
     let first_char = line.chars().next().unwrap_or(' ');
 
+    // `=` repeats the last operation
     if first_char == '=' {
-        engine.evaluate()?;
+        engine.repeat_last()?;
         return Ok(());
     }
 
-    // Check for negative numbers before treating '-' as an operator.
-    // A leading '-' followed by a digit or dot is a negative number (possibly part of
-    // a larger expression like "-5+2").
-    if first_char == '-' {
-        let rest = &line[1..];
-        let next_char = rest.chars().next().unwrap_or(' ');
-        if next_char.is_ascii_digit() || next_char == '.' {
-            if let Some((lhs, op, rhs)) = split_expression(line) {
-                return process_full_expression(lhs, op, rhs, engine);
-            }
-            let value = parse_number(line)?;
-            engine.set_input(value);
-            return Ok(());
-        }
-    }
-
-    if let Some(op) = Operator::from_char(first_char) {
-        // Line starts with an operator
-        let rest = line[first_char.len_utf8()..].trim();
-
-        engine.apply_operator(op)?;
-
-        if rest.is_empty() {
-            // No second operand; will use last result when equals is pressed
-        } else if rest == "=" {
-            engine.evaluate()?;
+    // Try to find an operator in the line (not at position 0)
+    if let Some((lhs_str, op, rhs_str)) = split_at_operator(line) {
+        let lhs = parse_number(lhs_str)?;
+        let rhs = if rhs_str.is_empty() {
+            // Operator-suffixed: `5+` → use last_result as rhs
+            engine.last_result().clone()
         } else {
-            let value = parse_number(rest)?;
-            engine.set_input(value);
-            engine.evaluate()?;
-        }
-
+            parse_number(rhs_str)?
+        };
+        engine.evaluate_binary(lhs, op, rhs)?;
         return Ok(());
     }
 
-    // Try to split as a full expression (e.g. "5+2", "10 / 3")
-    if let Some((lhs, op, rhs)) = split_expression(line) {
-        return process_full_expression(lhs, op, rhs, engine);
+    // Line starts with an operator: `+5` or `+` (use last_result as lhs)
+    if let Some(op) = Operator::from_char(first_char) {
+        let rest = line[first_char.len_utf8()..].trim();
+        let lhs = engine.last_result().clone();
+        let rhs = if rest.is_empty() {
+            // Bare operator like `+`: use last_result as both operands
+            engine.last_result().clone()
+        } else {
+            parse_number(rest)?
+        };
+        engine.evaluate_binary(lhs, op, rhs)?;
+        return Ok(());
     }
 
-    // Otherwise, try to parse as a number
+    // Bare number — set it as the current value
     let value = parse_number(line)?;
-    engine.set_input(value);
+    engine.set_value(value);
 
     Ok(())
 }
 
-/// Try to split a line into `(lhs, operator, rhs)` for expressions like `5+2` or `10 / 3`.
+/// Try to split a line at an operator, returning `(lhs, operator, rhs)`.
 ///
-/// Scans for the *last* operator that isn't at position 0 (to avoid treating a leading
-/// minus as an operator). This means `5-2` splits as `("5", Subtract, "2")` but `-5`
-/// does not split.
-fn split_expression(line: &str) -> Option<(&str, Operator, &str)> {
+/// Finds the rightmost operator that is not at position 0. A `-` immediately
+/// preceded by another operator is treated as a negative sign, not subtraction.
+fn split_at_operator(line: &str) -> Option<(&str, Operator, &str)> {
     let bytes = line.as_bytes();
 
-    // Find the rightmost operator that is not at position 0 and is not a negative sign.
-    // A '-' is a negative sign (not subtraction) if it immediately follows another operator.
-    // Searching from the right handles cases like `-5+2` correctly.
-    let op_pos = line.char_indices().rev().find(|&(i, c)| {
+    let (pos, ch) = line.char_indices().rev().find(|&(i, c)| {
         if i == 0 || Operator::from_char(c).is_none() {
             return false;
         }
-        // Skip '-' when it acts as a negative sign (preceded by another operator)
-        if c == '-' && i > 0 {
+        // A '-' right after another operator is a negative sign, not subtraction
+        if c == '-' {
             let prev = bytes[i - 1];
-            if Operator::from_char(prev as char).is_some() {
+            if Operator::from_char(char::from(prev)).is_some() {
                 return false;
             }
         }
         true
     })?;
 
-    let (pos, ch) = op_pos;
     let op = Operator::from_char(ch)?;
     let lhs = line[..pos].trim();
     let rhs = line[pos + ch.len_utf8()..].trim();
@@ -162,22 +144,4 @@ fn split_expression(line: &str) -> Option<(&str, Operator, &str)> {
     }
 
     Some((lhs, op, rhs))
-}
-
-/// Process a full expression with both operands on one line.
-fn process_full_expression(lhs: &str, op: Operator, rhs: &str, engine: &mut Engine) -> Result<()> {
-    let lhs_value = parse_number(lhs)?;
-    engine.set_input(lhs_value);
-    engine.apply_operator(op)?;
-
-    if rhs.is_empty() {
-        // Operator at end of line, e.g. "5+"
-        // Second operand will come later or use last result
-    } else {
-        let rhs_value = parse_number(rhs)?;
-        engine.set_input(rhs_value);
-        engine.evaluate()?;
-    }
-
-    Ok(())
 }
