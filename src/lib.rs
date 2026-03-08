@@ -8,16 +8,19 @@ use anyhow::Result;
 use crate::engine::{Engine, Operator, parse_number};
 use crate::format::format_rational;
 
-/// Default maximum number of display digits.
-const DEFAULT_MAX_DIGITS: usize = 20;
+/// Default maximum number of fractional digits displayed after the decimal point.
+pub const DEFAULT_MAX_FRACTIONAL_DIGITS: usize = 20;
 
 /// Run the interactive calculator REPL.
-pub fn run() -> Result<()> {
+///
+/// `max_fractional_digits` controls how many digits after the decimal point are
+/// shown before rounding occurs. The integer part is always displayed in full.
+pub fn run(max_fractional_digits: usize) -> Result<()> {
     let stdin = io::stdin();
     let stdout = io::stdout();
     let mut out = stdout.lock();
     let mut engine = Engine::new();
-    let max_digits = DEFAULT_MAX_DIGITS;
+    let max_digits = max_fractional_digits;
 
     writeln!(out, "exact - arbitrary precision calculator")?;
     writeln!(out, "Enter expressions using +, -, *, /")?;

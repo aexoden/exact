@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Arbitrary precision calculator engine using rational arithmetic (no precision loss).
 - Basic arithmetic operations: addition, subtraction, multiplication, division.
 - Configurable display precision with `~` prefix for inexact representations.
+- `--precision` / `-p` CLI flag to set the maximum number of digits after the decimal point (default: 20).
 - Interactive CLI REPL with number-pad-friendly input.
 - Implicit use of last result when starting a new operation after equals.
 - Last result available as second operand when no explicit operand is provided.

@@ -1,11 +1,13 @@
 use num::bigint::Sign;
 use num::{BigInt, BigRational, Integer, ToPrimitive, Zero};
 
-/// Format a `BigRational` for display with a configurable maximum number of digits.
+/// Format a `BigRational` for display, limiting the fractional part to at most
+/// `max_fractional_digits` digits after the decimal point.
 ///
-/// If the value cannot be exactly represented within `max_digits` decimal digits,
-/// the output is rounded and prefixed with `~`.
-pub fn format_rational(value: &BigRational, max_digits: usize) -> String {
+/// The integer part is always displayed in full regardless of its length.
+/// If the value cannot be exactly represented within the given number of
+/// fractional digits, the output is rounded and prefixed with `~`.
+pub fn format_rational(value: &BigRational, max_fractional_digits: usize) -> String {
     if value.numer().is_zero() {
         return "0".to_string();
     }
@@ -26,28 +28,13 @@ pub fn format_rational(value: &BigRational, max_digits: usize) -> String {
 
     let sign_prefix = if negative { "-" } else { "" };
 
+    // Exact integer — always display in full
     if remainder.is_zero() {
-        let full = format!("{sign_prefix}{integer_str}");
-        if integer_str.len() > max_digits {
-            return format!("~{}", round_integer_string(&full, max_digits, negative));
-        }
-        return full;
+        return format!("{sign_prefix}{integer_str}");
     }
 
-    // Compute decimal digits
-    let digits_for_integer = integer_str.len();
-
-    // If the integer part alone exceeds max_digits, we must round
-    if digits_for_integer >= max_digits {
-        return format!(
-            "~{}",
-            round_integer_string(&format!("{sign_prefix}{integer_str}"), max_digits, negative)
-        );
-    }
-
-    let digits_available = max_digits - digits_for_integer;
-
-    let (decimal_digits, is_exact) = compute_decimal_digits(&remainder, denom, digits_available);
+    let (decimal_digits, is_exact) =
+        compute_decimal_digits(&remainder, denom, max_fractional_digits);
 
     let trimmed = decimal_digits.trim_end_matches('0');
     if trimmed.is_empty() {
@@ -138,41 +125,6 @@ fn round_decimal_str(digits: &str) -> String {
     }
 }
 
-/// Round an integer string representation to `max_digits` significant digits.
-fn round_integer_string(s: &str, max_digits: usize, negative: bool) -> String {
-    let digit_str = if negative { &s[1..] } else { s };
-    let prefix = if negative { "-" } else { "" };
-
-    if digit_str.len() <= max_digits {
-        return s.to_string();
-    }
-
-    let significant = &digit_str[..max_digits];
-    let next_char = digit_str
-        .as_bytes()
-        .get(max_digits)
-        .copied()
-        .unwrap_or(b'0');
-
-    if next_char >= b'5' {
-        let r = round_up_digits(significant);
-        if r.len() > significant.len() {
-            format!(
-                "{prefix}{}{}",
-                r,
-                "0".repeat(digit_str.len() - max_digits - 1)
-            )
-        } else {
-            format!("{prefix}{r}{}", "0".repeat(digit_str.len() - max_digits))
-        }
-    } else {
-        format!(
-            "{prefix}{significant}{}",
-            "0".repeat(digit_str.len() - max_digits)
-        )
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -207,14 +159,14 @@ mod tests {
     fn test_repeating_decimal() {
         let result = format_rational(&ratio(1, 3), 10);
         assert!(result.starts_with('~'), "Expected ~ prefix, got: {result}");
-        assert_eq!(result, "~0.333333333");
+        assert_eq!(result, "~0.3333333333");
     }
 
     #[test]
     fn test_repeating_two_thirds() {
         let result = format_rational(&ratio(2, 3), 10);
         assert!(result.starts_with('~'), "Expected ~ prefix, got: {result}");
-        assert_eq!(result, "~0.666666667");
+        assert_eq!(result, "~0.6666666667");
     }
 
     #[test]
@@ -236,7 +188,7 @@ mod tests {
         // 1/7 = 0.142857142857...
         let result = format_rational(&ratio(1, 7), 4);
         assert!(result.starts_with('~'), "Expected ~ prefix, got: {result}");
-        assert_eq!(result, "~0.143");
+        assert_eq!(result, "~0.1429");
     }
 
     #[test]
@@ -254,6 +206,22 @@ mod tests {
     fn test_one_sixth() {
         let result = format_rational(&ratio(1, 6), 10);
         assert!(result.starts_with('~'), "Expected ~ prefix, got: {result}");
-        assert_eq!(result, "~0.166666667");
+        assert_eq!(result, "~0.1666666667");
+    }
+
+    #[test]
+    fn test_large_integer_not_rounded() {
+        // With fractional-only limiting, large integers should always display in full
+        let val =
+            BigRational::from_str("12345678901/1").unwrap_or_else(|_| ratio(12_345_678_901, 1));
+        assert_eq!(format_rational(&val, 4), "12345678901");
+    }
+
+    #[test]
+    fn test_large_integer_with_fraction() {
+        // 100000 + 1/3: integer part shown fully, fraction limited to max_fractional_digits
+        let val = BigRational::new(BigInt::from(300_001), BigInt::from(3));
+        let result = format_rational(&val, 4);
+        assert_eq!(result, "~100000.3333");
     }
 }
