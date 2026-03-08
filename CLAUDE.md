@@ -127,7 +127,7 @@ The library/binary split means:
 
 Allowed licenses (deny.toml): `Apache-2.0`, `MIT`, `MPL-2.0`, `Unicode-3.0`.
 
-Before adding a new dependency, confirm its license is on the allowlist. Run `cargo deny check` after any `Cargo.toml` change.
+Before adding a new dependency, confirm its license is on the allowlist. If a required dependency uses a non-copyleft license not yet on the list, it is acceptable to add that license to `deny.toml`. Copyleft licenses (e.g. GPL, LGPL, AGPL) should not be added. Run `cargo deny check` after any `Cargo.toml` or `deny.toml` change.
 
 ## CI/CD
 
